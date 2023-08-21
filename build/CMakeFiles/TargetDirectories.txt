@@ -1,4 +1,0 @@
-/home/tobias/programming_projects/networking/build/CMakeFiles/tests.dir
-/home/tobias/programming_projects/networking/build/CMakeFiles/main.dir
-/home/tobias/programming_projects/networking/build/CMakeFiles/edit_cache.dir
-/home/tobias/programming_projects/networking/build/CMakeFiles/rebuild_cache.dir

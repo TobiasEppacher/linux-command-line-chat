@@ -1,1 +1,0 @@
-/usr/bin/c++ -rdynamic CMakeFiles/tests.dir/TestTCPSocket.cpp.o CMakeFiles/tests.dir/TCPSocket.cpp.o -o tests 
