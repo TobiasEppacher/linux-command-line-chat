@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -rdynamic CMakeFiles/server.dir/Server.cpp.o CMakeFiles/server.dir/TCPSocket.cpp.o -o server 
