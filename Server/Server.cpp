@@ -5,33 +5,48 @@
 #include <fstream>
 #include <iostream>
 
-Server::Server(uint16_t port, int listenBufferSize) : m_running{false},
-                                                      m_port{port},
-                                                      m_listenBufferSize{listenBufferSize},
-                                                      m_listeningTCPSocket(TCPSocket(TCPSocketType::TCP)),
-                                                      m_stdinTCPSocket(TCPSocket::stdinSocket()),
-                                                      m_userDatabase{m_databasePath} {}
+Server::Server(uint16_t port) : m_running{false},
+                                m_port{port},
+                                m_listeningTCPSocket(TCPSocket(TCPSocketType::TCP)),
+                                m_stdinTCPSocket(TCPSocket::stdinSocket()),
+                                m_userDatabase{m_databasePath} {}
 
-Server::Command Server::m_parseCommand(const std::string& command) {
+Server::ServerCommand Server::m_parseCommand(const std::string& command) {
     if (command == "exit") {
-        return Command::STOP;
+        return ServerCommand::STOP;
     }
-    return Command::INVALID;
+    if (command == "help") {
+        return ServerCommand::HELP;
+    }
+    return ServerCommand::INVALID;
+}
+
+std::string Server::m_colorizeText(const std::string& text, TextColor color) {
+    switch (color) {
+        case TextColor::SERVER_ALERT:
+            return "\033[31m" + text + "\033[0m";
+        case TextColor::SERVER_MESSAGE:
+            return "\033[32m" + text + "\033[0m";
+        case TextColor::SERVER_NOTIFICATION:
+            return "\033[36m" + text + "\033[0m";
+        default:
+            return text;
+    }
 }
 
 void Server::run() {
     if (!m_listeningTCPSocket.bind(m_port)) {
-        std::cout << "bind failed, errno: " << std::to_string(errno) << std::endl;
-        throw std::runtime_error("Failed to bind socket");
+        std::cerr << "bind failed, errno: " << std::to_string(errno) << std::endl;
+        exit(1);
     }
 
     if (!m_listeningTCPSocket.listen(m_listenBufferSize)) {
-        std::cout << "listen failed, errno: " << std::to_string(errno) << std::endl;
-        throw std::runtime_error("Failed to listen on socket");
+        std::cerr << "listen failed, errno: " << std::to_string(errno) << std::endl;
+        exit(1);
     }
 
     m_running = true;
-    std::cout << "Server started on port " << m_port << std::endl;
+    std::cout << "Server running on port " << m_port << std::endl;
 
     while (m_running) {
         handleNewConnections();
@@ -46,21 +61,21 @@ void Server::handleNewConnections() {
         TCPSocket socket = m_listeningTCPSocket.accept();
         Connection connection = Connection(std::move(socket), UserData::empty());
         std::cout << "New connection from: " << connection.getSocket().getRemoteAddr() << std::endl;
-        connection.getSocket().send("Welcome to the server!\nRegister as new user using '/register <name> <password>'\nor login to an existing account using '/login <name> <password>'\n");
+        connection.getSocket().send(m_welcomeMsg);
         m_newConnections.push_back(std::move(connection));
     }
 }
 
 void Server::handleLogin() {
-    for (int conn = m_newConnections.size() - 1; conn >= 0; conn--) {
-        if (!m_newConnections[conn].dataAvailable()) {
+    for (int connIdx = m_newConnections.size() - 1; connIdx >= 0; connIdx--) {
+        if (!m_newConnections[connIdx].dataAvailable()) {
             continue;
         }
 
-        std::string data = m_newConnections[conn].recv();
+        std::string data = m_newConnections[connIdx].recv();
         if (data.empty()) {
-            std::cout << "Connection closed by client: " << m_newConnections[conn].getRemoteAddr() << std::endl;
-            m_newConnections.erase(m_newConnections.begin() + conn);
+            std::cout << "Connection closed by client: " << m_newConnections[connIdx].getRemoteAddr() << std::endl;
+            m_newConnections.erase(m_newConnections.begin() + connIdx);
             continue;
         }
 
@@ -73,81 +88,80 @@ void Server::handleLogin() {
         std::getline(dataStream, password);
 
         if (command == "/register") {
-            std::cerr << "Client on " << m_newConnections[conn].getRemoteAddr() << " attempts to register, using credentials " << name << ":" << password << std::endl;
+            std::cerr << "Client on " << m_newConnections[connIdx].getRemoteAddr() << " attempts to register, using credentials " << name << ":" << password << std::endl;
             if (name.empty() || password.empty()) {
-                m_newConnections[conn].getSocket().send("Invalid name or password\n");
+                m_newConnections[connIdx].getSocket().send("Invalid name or password\n");
                 continue;
             }
             if (name.length() < m_miminumNameLength || name.length() > m_maximumNameLength) {
-                m_newConnections[conn].getSocket().send("Name must be between " + std::to_string(m_miminumNameLength) + " and " + std::to_string(m_maximumNameLength) + " characters\n");
+                m_newConnections[connIdx].getSocket().send("Name must be between " + std::to_string(m_miminumNameLength) + " and " + std::to_string(m_maximumNameLength) + " characters\n");
                 continue;
             }
             if (m_userDatabase.findByName(name).getName() == name) {
-                m_newConnections[conn].getSocket().send("Name already taken\n");
+                m_newConnections[connIdx].getSocket().send("Name already taken\n");
                 continue;
             }
-            if (password.length() < m_miminumNameLength || password.length() > m_maximumNameLength) {
-                m_newConnections[conn].getSocket().send("Password must be between " + std::to_string(m_miminumNameLength) + " and " + std::to_string(m_maximumNameLength) + " characters\n");
+            if (password.length() < m_minimumPasswordLength || password.length() > m_maximumPasswordLength) {
+                m_newConnections[connIdx].getSocket().send("Password must be between " + std::to_string(m_miminumNameLength) + " and " + std::to_string(m_maximumNameLength) + " characters\n");
                 continue;
             }
 
             m_userDatabase.insert(UserData(m_nextClientId++, name, password));
 
         } else if (command == "/login") {
-            std::cerr << "Client on " << m_newConnections[conn].getRemoteAddr() << " attempts to login, using credentials " << name << ":" << password << std::endl;
+            std::cerr << "Client on " << m_newConnections[connIdx].getRemoteAddr() << " attempts to login, using credentials " << name << ":" << password << std::endl;
             if (name.empty() || password.empty()) {
-                m_newConnections[conn].getSocket().send("Invalid name or password\n");
+                m_newConnections[connIdx].getSocket().send("Invalid name or password\n");
                 continue;
             }
             if (name.length() < m_miminumNameLength || name.length() > m_maximumNameLength) {
-                m_newConnections[conn].getSocket().send("Name must be between " + std::to_string(m_miminumNameLength) + " and " + std::to_string(m_maximumNameLength) + " characters\n");
+                m_newConnections[connIdx].getSocket().send("Name must be between " + std::to_string(m_miminumNameLength) + " and " + std::to_string(m_maximumNameLength) + " characters\n");
                 continue;
             }
             if (password.length() < m_miminumNameLength || password.length() > m_maximumNameLength) {
-                m_newConnections[conn].getSocket().send("Password must be between " + std::to_string(m_miminumNameLength) + " and " + std::to_string(m_maximumNameLength) + " characters\n");
+                m_newConnections[connIdx].getSocket().send("Password must be between " + std::to_string(m_miminumNameLength) + " and " + std::to_string(m_maximumNameLength) + " characters\n");
                 continue;
             }
 
             UserData userData = m_userDatabase.findByName(name);
-            std::cerr << "Found user: " << userData << std::endl;
             if (userData == UserData::empty() || userData.getPassword() != password) {
-                m_newConnections[conn].getSocket().send("Invalid name or password\n");
+                m_newConnections[connIdx].getSocket().send("Invalid name or password\n");
                 continue;
             }
 
-            m_newConnections[conn].setClientData(userData);
-            m_approvedConnections.push_back(std::move(m_newConnections[conn]));
-            m_newConnections.erase(m_newConnections.begin() + conn);
+            m_newConnections[connIdx].setClientData(userData);
+            m_approvedConnections.push_back(std::move(m_newConnections[connIdx]));
+            m_newConnections.erase(m_newConnections.begin() + connIdx);
             sendServerNotification(userData.getName() + " joined the server");
             continue;
         } else {
-            m_newConnections[conn].getSocket().send("Invalid command\n");
+            m_newConnections[connIdx].getSocket().send("Invalid command\n");
             continue;
         }
     }
 }
 
 void Server::handleApprovedConnections() {
-    for (int conn = m_approvedConnections.size() - 1; conn >= 0; conn--) {
-        if (m_approvedConnections[conn].dataAvailable()) {
-            std::string message = m_approvedConnections[conn].recv();
+    for (int connIdx = m_approvedConnections.size() - 1; connIdx >= 0; connIdx--) {
+        if (m_approvedConnections[connIdx].dataAvailable()) {
+            std::string message = m_approvedConnections[connIdx].recv();
             if (message.empty()) {
-                sendServerNotification(m_approvedConnections[conn].getClientData().getName() + " left the server");
-                m_approvedConnections.erase(m_approvedConnections.begin() + conn);
+                sendServerNotification(m_approvedConnections[connIdx].getClientData().getName() + " left the server");
+                m_approvedConnections.erase(m_approvedConnections.begin() + connIdx);
                 continue;
             }
             if (message.back() != '\n') {
                 message += '\n';
             }
 
-            for (int conn2 = m_approvedConnections.size() - 1; conn2 >= 0; conn2--) {
-                if (conn == conn2) {
+            for (int connIdx2 = m_approvedConnections.size() - 1; connIdx2 >= 0; connIdx2--) {
+                if (connIdx == connIdx2) {
                     continue;
                 }
-                m_approvedConnections[conn2].send(m_approvedConnections[conn].getClientData().getName() + ": " + message);
+                m_approvedConnections[connIdx2].send(m_approvedConnections[connIdx].getClientData().getName() + ": " + message);
             }
 
-            std::cout << m_approvedConnections[conn].getClientData().getName() << ": " << message;
+            std::cout << m_approvedConnections[connIdx].getClientData().getName() << ": " << message;
         }
     }
 }
@@ -157,12 +171,28 @@ void Server::handleServerInput() {
         std::string input{};
         std::getline(std::cin, input);
 
-        if (input.front() != '/') {
-            sendServerMessage(input);
+        if (input.front() == '/') {
+            handleServerCommand(input.substr(1));
             return;
         } else {
-            handleServerCommand(input.substr(1));
+            sendServerMessage(input);
         }
+    }
+}
+
+void Server::handleServerCommand(const std::string& command) {
+    switch (m_parseCommand(command)) {
+        case ServerCommand::INVALID:
+            std::cout << ">>> Invalid command" << std::endl;
+            break;
+        case ServerCommand::STOP:
+            sendServerAlert(">>> Server shutdown");
+            m_running = false;
+            break;
+        case ServerCommand::HELP:
+            std::cout << m_consoleHelpMsg << std::endl;
+        default:
+            break;
     }
 }
 
@@ -189,32 +219,4 @@ void Server::sendServerNotification(const std::string& message) {
 
 void Server::sendServerAlert(const std::string& message) {
     sendGlobalMessage(">>> " + message, TextColor::SERVER_ALERT);
-}
-
-void Server::handleServerCommand(const std::string& command) {
-    switch (m_parseCommand(command)) {
-        case Command::INVALID:
-            std::cout << ">>> Invalid command" << std::endl;
-            break;
-        case Command::STOP:
-            sendServerAlert("Server shutdown");
-            m_running = false;
-            break;
-
-        default:
-            break;
-    }
-}
-
-std::string Server::m_colorizeText(const std::string& text, TextColor color) {
-    switch (color) {
-        case TextColor::SERVER_ALERT:
-            return "\033[31m" + text + "\033[0m";
-        case TextColor::SERVER_MESSAGE:
-            return "\033[32m" + text + "\033[0m";
-        case TextColor::SERVER_NOTIFICATION:
-            return "\033[36m" + text + "\033[0m";
-        default:
-            return text;
-    }
 }

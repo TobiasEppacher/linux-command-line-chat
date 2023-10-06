@@ -19,8 +19,8 @@ class Connection {
     bool operator==(const Connection& other) const;
 
     TCPSocket& getSocket();
+    
     UserData& getClientData();
-
     void setClientData(const UserData& clientData);
 
     std::string getRemoteAddr() const;

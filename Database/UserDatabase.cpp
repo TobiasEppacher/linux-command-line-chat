@@ -3,26 +3,24 @@
 #include <iostream>
 
 UserDatabase::UserDatabase(const std::string& path) {
-    std::cerr << "Opening database at " << path << std::endl;
+    std::cout << "Opening database at " << path << std::endl;
     int result = sqlite3_open(path.c_str(), &m_database);
     if (result != SQLITE_OK) {
         std::cerr << "Failed to open database: " << sqlite3_errmsg(m_database) << std::endl;
         sqlite3_close(m_database);
         exit(1);
     }
-    std::cerr << "Database opened successfully" << std::endl;
+    std::cout << "Database opened successfully" << std::endl;
 
-    std::cerr << "Creating table users if not exists" << std::endl;
     std::string createTableStmt = "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, password TEXT NOT NULL);";
     char* errMsg;
     result = sqlite3_exec(m_database, createTableStmt.c_str(), nullptr, nullptr, &errMsg);
     if (result != SQLITE_OK) {
-        std::cerr << "Failed to create table: " << errMsg << std::endl;
+        std::cerr << "Table 'users' does not exist and/or could not be created: " << errMsg << std::endl;
         sqlite3_free(errMsg);
         sqlite3_close(m_database);
         exit(1);
     }
-    std::cerr << "Table users created successfully" << std::endl;
 }
 
 UserDatabase::~UserDatabase() {
@@ -105,7 +103,6 @@ UserData UserDatabase::findByName(const std::string& name) {
         unsigned int id = sqlite3_column_int(stmt, 0);
         std::string name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
         std::string password = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
-        std::cerr << "Found user: " << id << ", " << name << ", " << password << std::endl;
         sqlite3_finalize(stmt);
         return UserData(id, name, password);
     }
